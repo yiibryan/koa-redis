@@ -1,110 +1,104 @@
 'use strict';
 
-const EventEmitter = require('events').EventEmitter;
+const debug = require('debug')('koa-redis');
 const Redis = require('ioredis');
+/**
+ * Initialize redis session middleware with `options`, isCluster (see the README for more info):
+ * @param options
+ * @param isCluster
+ * @returns {RedisStore|*}
+ * @constructor
+ */
+const RedisStore = function (options, isCluster = false) {
+  if (!(this instanceof RedisStore)) {
+    return new RedisStore(options, isCluster);
+  }
+  options = Object.assign({
+    redis: null,
+    config: {
+      port: 6379,          // Redis port
+      host: '127.0.0.1',   // Redis host
+      family: 4,           // 4 (IPv4) or 6 (IPv6)
+      password: 'auth',
+      db: 0
+    },
+    serialize: null,
+    unSerialize: null,
+    nodes: null,
+    redisOptions: null
+  }, options || {});
 
-class RedisStore extends EventEmitter {
-  constructor(redis, options) {
-    super();
-    this.synced = false;
+  let redis = null;
+  if (!options.redis) {
+    debug('Init redis new client');
 
-    this.options = Object.assign({
-      tableName: 'Sessions',
-      modelName: 'Session',
-      sync: true,               // if true, create the table if it doesn’t exist
-      syncTimeout: 3000,        // if sync is true, how long to wait for initial sync (ms)
-      gcFrequency: 10000,       // do garbage collection approx. every this many requests
-      timestamps: false,        // if true, add Sequelize updatedAt and createdAt columns
-      browserSessionLifetime: 86400 * 1000  // how long to remember sessions without a TTL
-    }, options || {});
-
-    if (this.options.sync) {
-      this.Model.sync().then(() => {
-        this.synced = true;
-        this.emit('connect');
-      });
+    // Apply ioredis, Add has redis cluster condition：
+    if (isCluster && options.nodes) {
+      redis = new Redis.Cluster(options.nodes, {redisOptions: options.redisOptions});
     } else {
-      this.synced = true;
-      this.emit('connect');
+      redis = new Redis(options.config);
     }
   }
+  this.redis = redis;
+  this.serialize = (typeof options.serialize === 'function' && options.serialize) || JSON.stringify;
+  this.unSerialize = (typeof options.unSerialize === 'function' && options.unSerialize) || JSON.parse;
+};
 
-  waitForSync() {
-    if (this.synced) { return Promise.resolve(); }
-
-    return new Promise((resolve, reject) => {
-      const end = Date.now() + this.options.syncTimeout;
-      const timerId = setInterval(() => {
-        if (this.synced) {
-          clearInterval(timerId);
-          return resolve();
-        }
-        if (Date.now() > end) {
-          clearInterval(timerId);
-          const errMessage = `could not sync() the ${this.options.modelName} model`;
-          return reject(new Error(errMessage));
-        }
-      }, 100);
-    });
-  }
-
-  get(sid) {
-    return this.waitForSync().then(() => {
-      if (this.options.gcFrequency > 0) {
-        if (getRandomInt(1, this.options.gcFrequency) === 1) { this.gc(); }
-      }
-
-      return this.Model.findOne({
-        where: {
-          id: sid,
-          expires: {
-            [this.sequelize.Sequelize.Op.gt]: Math.floor(Date.now() / 1000)
-          }
-        }
-      }).then(row => {
-        if (!row || !row.data) { return null; }
-        return JSON.parse(row.data);
-      });
-    });
-  }
-
-  set(sid, sess, ttl) {
-    if (!ttl) {
-      if (sess.cookie && sess.cookie.maxAge) {
-        // standard expiring cookie
-        return this.set(sid, sess, sess.cookie.maxAge);
-      } else if (this.options.browserSessionLifetime > 0) {
-        // browser-session cookie
-        return this.set(sid, sess, this.options.browserSessionLifetime);
-      }
+RedisStore.prototype.get = async function (sid) {
+  try {
+    const data = await this.redis.get(sid);
+    debug('get session: %s', data || 'none');
+    if (!data) {
+      return null;
     }
-
-    return this.waitForSync().then(() => {
-      const expires = Math.floor((Date.now() + (Math.max(ttl, 0) || 0)) / 1000);
-      return this.Model.findOrInitialize({ where: { id: sid } })
-        .then(function (result) {
-          const instance = result[0];
-          instance.data = JSON.stringify(sess);
-          instance.expires = expires;
-          return instance.save();
-        })
-        ;
-    });
+    return this.unSerialize(data.toString());
+  }catch (e) {
+    // ignore err
+    debug('parse session error: %s', e.message);
   }
+};
 
-  destroy(sid) {
-    return this.waitForSync().then(() => {
-      return this.Model.destroy({ where: { id: sid } });
-    });
+RedisStore.prototype.set = async function (sid, sess, ttl) {
+  if (typeof ttl === 'number') {
+    ttl = Math.ceil(ttl / 1000);
   }
+  sess = this.serialize(sess);
+  try{
+    if (ttl) {
+      debug('SETEX %s %s %s', sid, ttl, sess);
+      await this.redis.setex(sid, ttl, sess);
+    } else {
+      debug('SET %s %s', sid, sess);
+      await this.redis.set(sid, sess);
+    }
+    debug('SET %s complete', sid);
+  }catch(e){
+    debug('SET error: %s', e.message);
+  }
+};
 
-  gc() {
-    return this.waitForSync().then(() => {
-      return this.Model.destroy(
-        { where: { expires: { [this.sequelize.Sequelize.Op.lte]: Math.floor(Date.now() / 1000) } } }
-      );
-    });
+RedisStore.prototype.destroy = async function (sid) {
+  try{
+    debug('DEL %s', sid);
+    await this.redis.del(sid);
+    debug('DEL %s complete', sid);
+  }catch(e){
+    debug('SET error: %s', e.message);
   }
-}
+};
+
+RedisStore.prototype.quit = async function () {
+  try{
+    debug('quitting redis client');
+    await this.redis.quit();
+  }catch(e){
+    debug('SET error: %s', e.message);
+  }
+};
+
+RedisStore.prototype.end = async function(){
+  await this.quit();
+  debug('End redis client');
+};
 
 module.exports = RedisStore;
