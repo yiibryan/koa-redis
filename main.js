@@ -27,7 +27,7 @@ const RedisStore = function (options, isCluster = false) {
     nodes: null,
     redisOptions: null
   }, options || {});
-
+  this.prefix = options.prefix || 'session:';
   let redis = null;
   if (!options.redis) {
     debug('Init redis new client');
@@ -40,13 +40,32 @@ const RedisStore = function (options, isCluster = false) {
     }
   }
   this.redis = redis;
+  redis.on('error', (_error) => {
+    this.available = false;
+    debug(_error);
+  });
+
+  redis.on('end', () => {
+    this.available = false;
+    debug('Redis ended.');
+  });
+
+  redis.on('connect', () => {
+    this.available = true;
+    debug('Redis connected.');
+  });
+
   this.serialize = (typeof options.serialize === 'function' && options.serialize) || JSON.stringify;
   this.unSerialize = (typeof options.unSerialize === 'function' && options.unSerialize) || JSON.parse;
 };
 
-RedisStore.prototype.get = async function (sid) {
+RedisStore.prototype.get = async function (key) {
+  if(!this.available){
+    return;
+  }
   try {
-    const data = await this.redis.get(sid);
+    key = this.prefix + key;
+    const data = await this.redis.get(key);
     debug('get session: %s', data || 'none');
     if (!data) {
       return null;
@@ -58,30 +77,34 @@ RedisStore.prototype.get = async function (sid) {
   }
 };
 
-RedisStore.prototype.set = async function (sid, sess, ttl) {
+RedisStore.prototype.set = async function (key, sess, ttl) {
+  if(!this.available){
+    return;
+  }
   if (typeof ttl === 'number') {
     ttl = Math.ceil(ttl / 1000);
   }
+  key = this.prefix + key;
   sess = this.serialize(sess);
   try{
     if (ttl) {
-      debug('SETEX %s %s %s', sid, ttl, sess);
-      await this.redis.setex(sid, ttl, sess);
+      debug('SETEX %s %s %s', key, ttl, sess);
+      await this.redis.setex(key, ttl, sess);
     } else {
-      debug('SET %s %s', sid, sess);
-      await this.redis.set(sid, sess);
+      debug('SET %s %s', key, sess);
+      await this.redis.set(key, sess);
     }
-    debug('SET %s complete', sid);
+    debug('SET %s complete', key);
   }catch(e){
     debug('SET error: %s', e.message);
   }
 };
 
-RedisStore.prototype.destroy = async function (sid) {
+RedisStore.prototype.destroy = async function (key) {
   try{
-    debug('DEL %s', sid);
-    await this.redis.del(sid);
-    debug('DEL %s complete', sid);
+    debug('DEL %s', key);
+    await this.redis.del(key);
+    debug('DEL %s complete', key);
   }catch(e){
     debug('SET error: %s', e.message);
   }
