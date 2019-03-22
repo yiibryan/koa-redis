@@ -1,161 +1,129 @@
-/**!
- * koa-redis - index.js
- * Copyright(c) 2015
- * MIT Licensed
- *
- * Authors:
- *   dead_horse <dead_horse@qq.com> (http://deadhorse.me)
- */
-
 'use strict';
 
+const debug = require('debug')('koa-redis');
+const Redis = require('ioredis');
 /**
- * Module dependencies.
+ * Initialize redis session middleware with `options`, isCluster (see the README for more info):
+ * @param options
+ * @param isCluster
+ * @returns {RedisStore|*}
+ * @constructor
  */
-
-var EventEmitter = require('events').EventEmitter;
-var debug = require('debug')('koa-redis');
-var redis = require('redis');
-var redisWrapper = require('co-redis');
-var util = require('util');
-var wrap = require('co-wrap-all');
-
-/**
- * Initialize redis session middleware with `opts` (see the README for more info):
- *
- * @param {Object} options
- *   - {Object} client       redis client (overides all other options except db and duplicate)
- *   - {String} socket       redis connect socket (DEPRECATED: use 'path' instead)
- *   - {String} db           redis db
- *   - {Boolean} duplicate   if own client object, will use node redis's duplicate function and pass other options
- *   - {String} pass         redis password (DEPRECATED: use 'auth_pass' instead)
- *   - {Any} [any]           all other options inclduing above are passed to node_redis
- */
-var RedisStore = module.exports = function (options) {
+const RedisStore = function (options, isCluster = false) {
   if (!(this instanceof RedisStore)) {
-    return new RedisStore(options);
+    return new RedisStore(options, isCluster);
   }
-  EventEmitter.call(this);
-  options = options || {};
-
-  var client;
-  options.auth_pass = options.auth_pass || options.pass || null;     // For backwards compatibility
-  options.path = options.path || options.socket || null;             // For backwards compatibility
-  if (!options.client) {
+  options = Object.assign({
+    redis: null,
+    config: {
+      port: 6379,          // Redis port
+      host: '127.0.0.1',   // Redis host
+      family: 4,           // 4 (IPv4) or 6 (IPv6)
+      password: '',
+      db: 0
+    },
+    prefix:"",
+    serialize: null,
+    unSerialize: null,
+    nodes: null,
+    redisOptions: null
+  }, options || {});
+  this.prefix = options.prefix || 'session:';
+  let redis = null;
+  if (!options.redis) {
     debug('Init redis new client');
-    client = redis.createClient(options);
-  } else {
-    if (options.duplicate) {                                         // Duplicate client and update with options provided
-      debug('Duplicating provided client with new options (if provided)');
-      var dupClient = options.client;
-      delete options.client;
-      delete options.duplicate;
-      client = dupClient.duplicate(options);                         // Useful if you want to use the DB option without adjusting the client DB outside koa-redis
+
+    // Apply ioredis, Add has redis cluster condition：
+    if (isCluster && options.nodes) {
+      redis = new Redis.Cluster(options.nodes, {redisOptions: options.redisOptions});
     } else {
-      debug('Using provided client');
-      client = options.client;
+      redis = new Redis(options.config);
     }
   }
-
-  if (options.db) {
-    debug('selecting db %s', options.db)
-    client.select(options.db);
-    client.on('connect', function() {
-      client.send_anyways = true;
-      client.select(options.db);
-      client.send_anyways = false;
-    });
-  }
-
-  client.on('error', this.emit.bind(this, 'error'));
-  client.on('end', this.emit.bind(this, 'end'));
-  client.on('end', this.emit.bind(this, 'disconnect'));              // For backwards compatibility
-  client.on('connect', this.emit.bind(this, 'connect'));
-  client.on('reconnecting', this.emit.bind(this, 'reconnecting'));
-  client.on('ready', this.emit.bind(this, 'ready'));
-  client.on('warning', this.emit.bind(this, 'warning'));
-  this.on('connect', function() {
-    debug('connected to redis');
-    this.connected = client.connected;
-  });
-  this.on('ready', function() {
-    debug('redis ready');
-  });
-  this.on('end', function() {
-    debug('redis ended');
-    this.connected = client.connected;
-  });
-  // No good way to test error
-  /* istanbul ignore next */
-  this.on('error', function() {
-    debug('redis error');
-    this.connected = client.connected;
-  });
-  // No good way to test reconnect
-  /* istanbul ignore next */
-  this.on('reconnecting', function() {
-    debug('redis reconnecting');
-    this.connected = client.connected;
-  });
-  // No good way to test warning
-  /* istanbul ignore next */
-  this.on('warning', function() {
-    debug('redis warning');
-    this.connected = client.connected;
+  this.redis = redis;
+  redis.on('error', (_error) => {
+    this.available = false;
+    debug(_error);
   });
 
-  //wrap redis
-  this._redisClient = client;
-  this.client = redisWrapper(client);
-  this.connected = client.connected;
+  redis.on('end', () => {
+    this.available = false;
+    debug('Redis ended.');
+  });
 
-  // support optional serialize and unserialize
+  redis.on('connect', () => {
+    this.available = true;
+    debug('Redis connected.');
+  });
+
   this.serialize = (typeof options.serialize === 'function' && options.serialize) || JSON.stringify;
-  this.unserialize = (typeof options.unserialize === 'function' && options.unserialize) || JSON.parse;
+  this.unSerialize = (typeof options.unSerialize === 'function' && options.unSerialize) || JSON.parse;
 };
 
-util.inherits(RedisStore, EventEmitter);
-
-RedisStore.prototype.get = function *(sid) {
-  var data = yield this.client.get(sid);
-  debug('get session: %s', data || 'none');
-  if (!data) {
-    return null;
+RedisStore.prototype.get = async function (key) {
+  if(!this.available){
+    return;
   }
   try {
-    return this.unserialize(data.toString());
-  } catch (err) {
+    key = this.prefix + key;
+    const data = await this.redis.get(key);
+    debug('get session: %s', data || 'none');
+    if (!data) {
+      return null;
+    }
+    return this.unSerialize(data.toString());
+  }catch (e) {
     // ignore err
-    debug('parse session error: %s', err.message);
+    debug('parse session error: %s', e.message);
   }
 };
 
-RedisStore.prototype.set = function *(sid, sess, ttl) {
+RedisStore.prototype.set = async function (key, sess, ttl) {
+  if(!this.available){
+    return;
+  }
   if (typeof ttl === 'number') {
     ttl = Math.ceil(ttl / 1000);
   }
+  key = this.prefix + key;
   sess = this.serialize(sess);
-  if (ttl) {
-    debug('SETEX %s %s %s', sid, ttl, sess);
-    yield this.client.setex(sid, ttl, sess);
-  } else {
-    debug('SET %s %s', sid, sess);
-    yield this.client.set(sid, sess);
+  try{
+    if (ttl) {
+      debug('SETEX %s %s %s', key, ttl, sess);
+      await this.redis.setex(key, ttl, sess);
+    } else {
+      debug('SET %s %s', key, sess);
+      await this.redis.set(key, sess);
+    }
+    debug('SET %s complete', key);
+  }catch(e){
+    debug('SET error: %s', e.message);
   }
-  debug('SET %s complete', sid);
 };
 
-RedisStore.prototype.destroy = function *(sid) {
-  debug('DEL %s', sid);
-  yield this.client.del(sid);
-  debug('DEL %s complete', sid);
+RedisStore.prototype.destroy = async function (key) {
+  try{
+    key = this.prefix + key;
+    debug('DEL %s', key);
+    await this.redis.del(key);
+    debug('DEL %s complete', key);
+  }catch(e){
+    debug('SET error: %s', e.message);
+  }
 };
 
-RedisStore.prototype.quit = function* () {                         // End connection SAFELY
-  debug('quitting redis client');
-  yield this.client.quit();
+RedisStore.prototype.quit = async function () {
+  try{
+    debug('quitting redis client');
+    await this.redis.quit();
+  }catch(e){
+    debug('SET error: %s', e.message);
+  }
 };
 
-wrap(RedisStore.prototype);
+RedisStore.prototype.end = async function(){
+  await this.quit();
+  debug('End redis client');
+};
 
-RedisStore.prototype.end = RedisStore.prototype.quit;              // End connection SAFELY. The real end() command should never be used, as it cuts off to queue.
+module.exports = RedisStore;

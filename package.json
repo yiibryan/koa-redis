@@ -1,12 +1,12 @@
 {
   "name": "koa-redis",
-  "description": "koa session with redis using koa-generic-session",
+  "description": "koa session with redis using koa-session-minimal/koa-session",
   "repository": "koajs/koa-redis",
   "bugs": {
     "url": "https://github.com/koajs/koa-redis/issues"
   },
   "files": [
-    "index.js"
+	  "index.js"
   ],
   "homepage": "https://github.com/koajs/koa-redis",
   "version": "3.1.3",
