@@ -1,14 +1,14 @@
 {
-  "name": "koa-redis",
+  "name": "@yir/koa-redis",
   "description": "koa session with redis using koa-session-minimal/koa-session",
-  "repository": "koajs/koa-redis",
+  "repository": "yiibryan/koa-redis",
   "bugs": {
-    "url": "https://github.com/koajs/koa-redis/issues"
+    "url": "https://github.com/yiibryan/koa-redis/issues"
   },
   "files": [
     "index.js"
   ],
-  "homepage": "https://github.com/koajs/koa-redis",
+  "homepage": "https://github.com/yiibryan/koa-redis",
   "version": "0.0.1",
   "main": "index.js",
   "scripts": {
@@ -39,7 +39,7 @@
     "should": "^13.2.3"
   },
   "engines": {
-    "node": ">= 4"
+    "node": ">= 8"
   },
   "license": "MIT"
 }

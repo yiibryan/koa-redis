@@ -1,57 +1,44 @@
 koa-redis
 =========
 
-[![NPM version][npm-image]][npm-url]
 [![build status][travis-image]][travis-url]
-[![Coveralls][coveralls-image]][coveralls-url]
-[![David deps][david-image]][david-url]
-[![David devDeps][david-dev-image]][david-dev-url]
 [![node version][node-image]][node-url]
-[![npm download][download-image]][download-url]
 [![license][license-image]][license-url]
 
-[npm-image]: https://img.shields.io/npm/v/koa-redis.svg?style=flat-square
-[npm-url]: https://npmjs.org/package/koa-redis
 [travis-image]: https://img.shields.io/travis/koajs/koa-redis.svg?style=flat-square
 [travis-url]: https://travis-ci.org/koajs/koa-redis
-[coveralls-image]: https://img.shields.io/coveralls/koajs/koa-redis.svg?style=flat-square
-[coveralls-url]: https://coveralls.io/r/koajs/koa-redis?branch=master
-[david-image]: https://img.shields.io/david/koajs/koa-redis.svg?style=flat-square&label=deps
-[david-url]: https://david-dm.org/koajs/koa-redis
-[david-dev-image]: https://img.shields.io/david/dev/koajs/koa-redis.svg?style=flat-square&label=devDeps
-[david-dev-url]: https://david-dm.org/koajs/koa-redis#info=devDependencies
-[david-opt-image]: https://img.shields.io/david/optional/koajs/koa-redis.svg?style=flat-square&label=optDeps
-[david-opt-url]: https://david-dm.org/koajs/koa-redis#info=devDependencies
 [node-image]: https://img.shields.io/node/v/koa-redis.svg?style=flat-square
 [node-url]: http://nodejs.org/download/
-[download-image]: https://img.shields.io/npm/dm/koa-redis.svg?style=flat-square
-[download-url]: https://npmjs.org/package/koa-redis
-[gittip-image]: https://img.shields.io/gittip/dead-horse.svg?style=flat-square
-[gittip-url]: https://www.gittip.com/dead-horse/
 [license-image]: https://img.shields.io/npm/l/koa-redis.svg?style=flat-square
-[license-url]: https://github.com/koajs/koa-redis/blob/master/LICENSE
+[license-url]: https://github.com/yiibryan/koa-redis/blob/master/LICENSE
 
-Redis storage for koa session middleware/cache.
-
-[![NPM](https://nodei.co/npm/koa-redis.svg?downloads=true)](https://nodei.co/npm/koa-redis/)
+Copy from [koa-redis](https://github.com/koajs/koa-redis).  
+Redis storage for koa session middleware/cache.  
+**Support redis cluster.**
 
 ## Usage
 
-`koa-redis` works with [koa-generic-session](https://github.com/koajs/generic-session) (a generic session middleware for koa).
+`koa-redis` works with [koa-session-minimal](https://github.com/longztian/koa-session-minimal) (a generic session middleware for koa) or [koa-session](https://github.com/koajs/session).  
+`koa-redis` use [ioredis](https://github.com/luin/ioredis) to connect redis. so the config will support `ioredis` options.
 
 ### Example
 
 ```js
-var session = require('koa-generic-session');
-var redisStore = require('koa-redis');
+var session = require('koa-session-minimal');
+var redisStore = require('@yir/koa-redis');
 var koa = require('koa');
 
 var app = koa();
-app.keys = ['keys', 'keykeys'];
 app.use(session({
-  store: redisStore({
-    // Options specified here
-  })
+  key:'USER_SID',
+  store:redisStore({config: 'redis://:123456@127.0.0.1:6379/1'})
+  /*store:redisStore({config: {
+      port: 6379,          // Redis port
+      host: '127.0.0.1',   // Redis host
+      family: 4,           // 4 (IPv4) or 6 (IPv6)
+      password: '123456',
+      db: 1
+    }})*/
 }));
 
 app.use(function *() {
@@ -92,41 +79,40 @@ For more examples, please see the [examples folder of `koa-generic-session`](htt
 
 ### Options
 
- - *all [`node_redis`](https://www.npmjs.com/package/redis#options-is-an-object-with-the-following-possible-properties) options* - Useful things include `url`, `host`, `port`, and `path` to the server. Defaults to `127.0.0.1:6379`
+ - *all [`ioredis`](https://github.com/luin/ioredis-properties) options* - Useful things include `url`, `host`, `port`, and `path` to the server. Defaults to `127.0.0.1:6379`
  - `db` (number) - will run `client.select(db)` after connection
  - `client` (object) - supply your own client, all other options are ignored unless `duplicate` is also supplied
  - `duplicate` (boolean) - When true, it will run `client.duplicate(options)` on the supplied `client` and use all other options supplied. This is useful if you want to select a different DB for sessions but also want to base from the same client object.
  - `serialize` - Used to serialize the data that is saved into the store.
  - `unserialize` - Used to unserialize the data that is fetched from the store.
- - **DEPRECATED:** old options - `pass` and `socket` have been replaced by `auth_pass` and `path`, but they should be backward compatible (still work).
 
 ### Events
-See the [`node_redis` docs](https://www.npmjs.com/package/redis#connection-events) for more info.
- - `ready`
- - `connect`
- - `reconnecting`
- - `error`
- - `end`
- - `warning`
+See the [`ioredis` docs](https://github.com/luin/ioredis) for more info.
 
 ### API
-These are some the functions that `koa-generic-session` uses that you can use manually. You will need to initialize differently than the example above:
+These are some the functions that `koa-session-minimal` / `koa-session` uses that you can use manually. You will need to initialize differently than the example above:
 ```js
-var session = require('koa-generic-session');
-var redisStore = require('koa-redis')({
+var session = require('koa-session-minimal');
+var redisStore = require('@yir/koa-redis')({
   // Options specified here
 });
 var app = require('koa')();
 
 app.keys = ['keys', 'keykeys'];
 app.use(session({
+  key:'keys',
   store: redisStore
 }));
 ```
 
 #### module([options])
 Initialize the Redis connection with the optionally provided options (see above). *The variable `session` below references this*.
-
+```js
+var session = require('@yir/koa-redis')({
+  // Options specified here
+});
+session.client.set(sid, sess, ttl);
+```
 #### session.get(sid)
 Generator that gets a session by ID. Returns parsed JSON is exists, `null` if it does not exist, and nothing upon error.
 
@@ -145,22 +131,8 @@ Alias to `session.quit()`. It is not safe to use the real end function, as it cu
 #### session.connected
 Boolean giving the connection status updated using `client.connected` after any of the events above is fired.
 
-#### session.\_redisClient
-Direct access to the `node_redis` client object.
-
 #### session.client
-Direct access to the `co-redis` wrapper around the `node_redis` client.
-
-## Benchmark
-
-|Server|Transaction rate|Response time|
-|------|----------------|-------------|
-|connect without session|**6763.56 trans/sec**|**0.01 secs**|
-|koa without session|**5684.75 trans/sec**|**0.01 secs**|
-|connect with session|**2759.70 trans/sec**|**0.02 secs**|
-|koa with session|**2355.38 trans/sec**|**0.02 secs**|
-
-Detailed benchmark report [here](https://github.com/koajs/koa-redis/tree/master/benchmark)
+Direct access to the `ioredis` client object.
 
 ## Testing
 1. Start a Redis server on `localhost:6379`. You can use [`redis-windows`](https://github.com/ServiceStack/redis-windows) if you are on Windows or just want a quick VM-based server.
