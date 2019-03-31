@@ -14,7 +14,7 @@ const RedisStore = function (options, isCluster = false) {
     return new RedisStore(options, isCluster);
   }
   options = Object.assign({
-    redis: null,
+    client: null,
     config: {
       port: 6379,          // Redis port
       host: '127.0.0.1',   // Redis host
@@ -40,6 +40,7 @@ const RedisStore = function (options, isCluster = false) {
       this.client = new Redis(options.config);
     }
   }else{
+    debug('Using provided client');
     this.client = options.client;
   }
   this.client.on('error', (_error) => {
@@ -51,8 +52,8 @@ const RedisStore = function (options, isCluster = false) {
   });
 
   this.client.on('connect', () => {
-    this.connected = true;
     debug('Redis connected.');
+    this.connected = this.client.connected;
   });
 
   this.serialize = (typeof options.serialize === 'function' && options.serialize) || JSON.stringify;
